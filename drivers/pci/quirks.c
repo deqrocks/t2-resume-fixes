@@ -3938,6 +3938,39 @@ static void quirk_apple_poweroff_thunderbolt(struct pci_dev *dev)
 DECLARE_PCI_FIXUP_SUSPEND_LATE(PCI_VENDOR_ID_INTEL,
 			       PCI_DEVICE_ID_INTEL_CACTUS_RIDGE_4C,
 			       quirk_apple_poweroff_thunderbolt);
+
+/*
+ * On Apple T2 Macs the integrated Thunderbolt NHI and its tunneled PCIe
+ * root ports live directly on the root complex. Letting the Thunderbolt
+ * root ports enter D3hot during system suspend can make secondary CPU
+ * bringup after resume extremely slow. Keep these ports in D0 by saving
+ * the PCI state early so pci_pm_suspend_noirq() skips pci_prepare_to_sleep().
+ */
+static void quirk_apple_tb_root_port_no_d3(struct pci_dev *dev)
+{
+	struct acpi_device *adev;
+	const char *bid;
+
+	if (!x86_apple_machine)
+		return;
+	if (!pci_is_pcie(dev))
+		return;
+	if (pci_pcie_type(dev) != PCI_EXP_TYPE_ROOT_PORT)
+		return;
+
+	adev = ACPI_COMPANION(&dev->dev);
+	if (!adev)
+		return;
+
+	bid = acpi_device_bid(adev);
+	if (!bid || strncmp(bid, "TRP", 3) != 0)
+		return;
+
+	pci_info(dev, "quirk: keeping Apple Thunderbolt root port in D0 during suspend\n");
+	pci_save_state(dev);
+}
+DECLARE_PCI_FIXUP_SUSPEND(PCI_VENDOR_ID_INTEL, PCI_ANY_ID,
+			  quirk_apple_tb_root_port_no_d3);
 #endif
 
 /*
