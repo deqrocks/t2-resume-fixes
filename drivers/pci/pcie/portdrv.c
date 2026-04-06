@@ -7,6 +7,7 @@
  */
 
 #include <linux/bitfield.h>
+#include <linux/acpi.h>
 #include <linux/dmi.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -18,9 +19,36 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/aer.h>
+#include <linux/platform_data/x86/apple.h>
 
 #include "../pci.h"
 #include "portdrv.h"
+
+static bool pcie_port_no_msi_on_apple_t2(struct pci_dev *dev)
+{
+	acpi_handle handle;
+	struct acpi_buffer buf = { ACPI_ALLOCATE_BUFFER, NULL };
+	char *name;
+	bool ret = false;
+
+	if (!x86_apple_machine)
+		return false;
+	if (pci_pcie_type(dev) != PCI_EXP_TYPE_ROOT_PORT)
+		return false;
+
+	handle = ACPI_HANDLE(&dev->dev);
+	if (!handle)
+		return false;
+
+	if (ACPI_SUCCESS(acpi_get_name(handle, ACPI_SINGLE_NAME, &buf))) {
+		name = buf.pointer;
+		if (name)
+			ret = !strncmp(name, "TRP", 3);
+	}
+
+	ACPI_FREE(buf.pointer);
+	return ret;
+}
 
 /*
  * The PCIe Capability Interrupt Message Number (PCIe r3.1, sec 7.8.2) must
@@ -180,6 +208,9 @@ static int pcie_init_service_irqs(struct pci_dev *dev, int *irqs, int mask)
 
 	for (i = 0; i < PCIE_PORT_DEVICE_MAXSERVICES; i++)
 		irqs[i] = -1;
+
+	if (pcie_port_no_msi_on_apple_t2(dev))
+		goto intx_irq;
 
 	/*
 	 * If we support PME but can't use MSI/MSI-X for it, we have to
